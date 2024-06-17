@@ -13,75 +13,70 @@ let sessionClientAnswer;
 let statsIntervalId;
 let videoIsPlaying;
 let lastBytesReceived;
-let agentId;
-let chatId;
+let agentId = "agt_O3O9tAZZ";
+let chatId = "cht_zufHnPc8Fc11Ub4UVwR-N";
 
 const videoElement = document.getElementById('video-element');
 videoElement.setAttribute('playsinline', '');
 
 // Play the idle video when the page is loaded
-window.onload = (event) => {
-
+window.onload = () => {
   playIdleVideo();
 
-  if (agentId == "" || agentId == undefined) {
+  if (!agentId) {
     console.log("Empty 'agentID' and 'chatID' variables\n\n1. Click on the 'Create new Agent with Knowledge' button\n2. Open the Console and wait for the process to complete\n3. Press on the 'Connect' button\n4. Type and send a message to the chat\nNOTE: You can store the created 'agentID' and 'chatId' variables at the bottom of the JS file for future chats");
   } else {
-    console.log("You are good to go!\nClick on the 'Connect Button', Then send a new message\nAgent ID: ", agentId, "\nChat ID: ", chatId);
+    console.log(`You are good to go!\nClick on the 'Connect Button', Then send a new message\nAgent ID: ${agentId}\nChat ID: ${chatId}`);
   }
 };
 
 async function createPeerConnection(offer, iceServers) {
   if (!peerConnection) {
     peerConnection = new RTCPeerConnection({ iceServers });
-    peerConnection.addEventListener('icecandidate', onIceCandidate, true);
-    peerConnection.addEventListener('iceconnectionstatechange', onIceConnectionStateChange, true);
-    peerConnection.addEventListener('track', onTrack, true);
+    peerConnection.addEventListener('icecandidate', onIceCandidate);
+    peerConnection.addEventListener('iceconnectionstatechange', onIceConnectionStateChange);
+    peerConnection.addEventListener('track', onTrack);
   }
 
   await peerConnection.setRemoteDescription(offer);
-  console.log('set remote sdp OK');
+  console.log('Set remote SDP OK');
 
-  const sessionClientAnswer = await peerConnection.createAnswer();
-  console.log('create local sdp OK');
+  sessionClientAnswer = await peerConnection.createAnswer();
+  console.log('Create local SDP OK');
 
   await peerConnection.setLocalDescription(sessionClientAnswer);
-  console.log('set local sdp OK');
+  console.log('Set local SDP OK');
 
-  let dc = await peerConnection.createDataChannel("JanusDataChannel");
-  dc.onopen = () => {
-    console.log("datachannel open");
-  };
-
-  let decodedMsg;
-  dc.onmessage = (event) => {
-    let msg = event.data;
-    let msgType = "chat/answer:";
-    if (msg.includes(msgType)) {
-      msg = decodeURIComponent(msg.replace(msgType, ""));
-      console.log(msg);
-      decodedMsg = msg;
-      return decodedMsg;
-    }
-    if (msg.includes("stream/started")) {
-      console.log(msg);
-    } else {
-      console.log(msg);
-    }
-  };
-
-  dc.onclose = () => {
-    console.log("datachannel close");
-  };
+  const dc = peerConnection.createDataChannel("JanusDataChannel");
+  dc.onopen = () => console.log("Datachannel open");
+  dc.onmessage = handleDataChannelMessage;
+  dc.onclose = () => console.log("Datachannel close");
 
   return sessionClientAnswer;
+}
+
+function handleDataChannelMessage(event) {
+  const msg = event.data;
+  const msgType = "chat/answer:";
+
+  if (msg.includes(msgType)) {
+    const decodedMsg = decodeURIComponent(msg.replace(msgType, ""));
+    console.log(decodedMsg);
+    return decodedMsg;
+  }
+
+  if (msg.includes("stream/started")) {
+    console.log(msg);
+  } else {
+    console.log(msg);
+  }
 }
 
 function onIceCandidate(event) {
   if (event.candidate) {
     const { candidate, sdpMid, sdpMLineIndex } = event.candidate;
 
-    fetch(`/api/talks/streams/${streamId}/ice`, {
+    fetchWithRetries(`/api/talks/streams/${streamId}/ice`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -99,18 +94,14 @@ function onIceCandidate(event) {
 function onIceConnectionStateChange() {
   if (peerConnection.iceConnectionState === 'failed' || peerConnection.iceConnectionState === 'closed') {
     stopAllStreams();
-    closePC();
+    closePeerConnection();
   }
 }
 
 function onVideoStatusChange(videoIsPlaying, stream) {
-  let status;
   if (videoIsPlaying) {
-    status = 'streaming';
-    const remoteStream = stream;
-    setVideoElement(remoteStream);
+    setVideoElement(stream);
   } else {
-    status = 'empty';
     playIdleVideo();
   }
 }
@@ -122,7 +113,7 @@ function onTrack(event) {
     const stats = await peerConnection.getStats(event.track);
     stats.forEach((report) => {
       if (report.type === 'inbound-rtp' && report.kind === 'video') {
-        const videoStatusChanged = videoIsPlaying !== report.bytesReceived > lastBytesReceived;
+        const videoStatusChanged = videoIsPlaying !== (report.bytesReceived > lastBytesReceived);
 
         if (videoStatusChanged) {
           videoIsPlaying = report.bytesReceived > lastBytesReceived;
@@ -136,6 +127,7 @@ function onTrack(event) {
 
 function setVideoElement(stream) {
   if (!stream) return;
+
   videoElement.classList.add("animated");
   videoElement.muted = false;
   videoElement.srcObject = stream;
@@ -146,16 +138,13 @@ function setVideoElement(stream) {
   }, 1000);
 
   if (videoElement.paused) {
-    videoElement
-      .play()
-      .then((_) => { })
-      .catch((e) => { });
+    videoElement.play().catch(console.error);
   }
 }
 
 function playIdleVideo() {
-  videoElement.classList.toggle("animated");
-  videoElement.srcObject = undefined;
+  videoElement.classList.add("animated");
+  videoElement.srcObject = null;
   videoElement.src = 'https://athena-bot-bucket.s3.eu-north-1.amazonaws.com/idle_video.mp4';
   videoElement.loop = true;
 
@@ -166,29 +155,28 @@ function playIdleVideo() {
 
 function stopAllStreams() {
   if (videoElement.srcObject) {
-    console.log('stopping video streams');
+    console.log('Stopping video streams');
     videoElement.srcObject.getTracks().forEach((track) => track.stop());
     videoElement.srcObject = null;
   }
 }
 
-function closePC(pc = peerConnection) {
-  if (!pc) return;
-  console.log('stopping peer connection');
+function closePeerConnection() {
+  if (!peerConnection) return;
 
-  pc.close();
-  pc.removeEventListener('icecandidate', onIceCandidate, true);
-  pc.removeEventListener('iceconnectionstatechange', onIceConnectionStateChange, true);
-  pc.removeEventListener('track', onTrack, true);
+  console.log('Stopping peer connection');
+  peerConnection.close();
+  peerConnection.removeEventListener('icecandidate', onIceCandidate);
+  peerConnection.removeEventListener('iceconnectionstatechange', onIceConnectionStateChange);
+  peerConnection.removeEventListener('track', onTrack);
   clearInterval(statsIntervalId);
-  console.log('stopped peer connection');
-  if (pc === peerConnection) {
-    peerConnection = null;
-  }
+  peerConnection = null;
+  console.log('Stopped peer connection');
 }
 
 const maxRetryCount = 3;
 const maxDelaySec = 4;
+
 async function fetchWithRetries(url, options, retries = 1) {
   try {
     return await fetch(url, options);
@@ -196,28 +184,28 @@ async function fetchWithRetries(url, options, retries = 1) {
     if (retries <= maxRetryCount) {
       const delay = Math.min(Math.pow(2, retries) / 4 + Math.random(), maxDelaySec) * 1000;
       await new Promise((resolve) => setTimeout(resolve, delay));
-      console.log(`Request failed, retrying ${retries}/${maxRetryCount}. Error ${err}`);
+      console.log(`Request failed, retrying ${retries}/${maxRetryCount}. Error: ${err}`);
       return fetchWithRetries(url, options, retries + 1);
     } else {
-      throw new Error(`Max retries exceeded. error: ${err}`);
+      throw new Error(`Max retries exceeded. Error: ${err}`);
     }
   }
 }
 
 const connectButton = document.getElementById('connect-button');
 connectButton.onclick = async () => {
-  connectButton.classList.toggle('loading');
+  connectButton.classList.add('loading');
   connectButton.innerText = 'Connecting...';
 
-  if (agentId == "" || agentId === undefined) {
-    return alert("1. Click on the 'Create new Agent with Knowledge' button\n2. Open the Console and wait for the process to complete\n3. Press on the 'Connect' button\n4. Type and send a message to the chat\nNOTE: You can store the created 'agentID' and 'chatId' variables at the bottom of the JS file for future chats");
-  }
-
-  if (peerConnection && peerConnection.connectionState === 'connected') {
+  if (!agentId) {
+    alert("1. Click on the 'Create new Agent with Knowledge' button\n2. Open the Console and wait for the process to complete\n3. Press on the 'Connect' button\n4. Type and send a message to the chat\nNOTE: You can store the created 'agentID' and 'chatId' variables at the bottom of the JS file for future chats");
     return;
   }
+
+  if (peerConnection && peerConnection.connectionState === 'connected') return;
+
   stopAllStreams();
-  closePC();
+  closePeerConnection();
 
   const sessionResponse = await fetchWithRetries('/api/talks/streams', {
     method: 'POST',
@@ -233,17 +221,18 @@ connectButton.onclick = async () => {
   const { id: newStreamId, offer, ice_servers: iceServers, session_id: newSessionId } = await sessionResponse.json();
   streamId = newStreamId;
   sessionId = newSessionId;
+
   try {
-    console.log('creating peer connection', offer, iceServers);
+    console.log('Creating peer connection', offer, iceServers);
     sessionClientAnswer = await createPeerConnection(offer, iceServers);
-  } catch (e) {
-    console.log('error during streaming setup', e);
+  } catch (error) {
+    console.log('Error during streaming setup', error);
     stopAllStreams();
-    closePC();
+    closePeerConnection();
     return;
   }
 
-  await fetch(`/api/talks/streams/${streamId}/sdp`, {
+  await fetchWithRetries(`/api/talks/streams/${streamId}/sdp`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -254,7 +243,7 @@ connectButton.onclick = async () => {
     }),
   });
 
-  connectButton.classList.toggle('loading');
+  connectButton.classList.remove('loading');
   connectButton.innerText = 'Connected!';
 
   setTimeout(() => {
@@ -264,154 +253,57 @@ connectButton.onclick = async () => {
 
 const recordButton = document.getElementById('record-button');
 const playIcon = document.getElementById('play-icon');
+
 recordButton.onclick = async () => {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let transcript = '';
 
-  if (SpeechRecognition) {
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'fr-FR';
-
-    const textArea = document.getElementById("textArea");
-
-    recognition.start();
-    recordButton.classList.add('recording');
-    playIcon.classList.add('recording');
-    console.log("Reconnaissance vocale commencée. Parlez dans le microphone.");
-
-    recognition.onresult = (event) => {
-      transcript = event.results[0][0].transcript;
-      console.log("Résultat de la reconnaissance vocale : ", transcript);
-    };
-
-    recognition.onerror = (event) => {
-      console.error("Erreur de reconnaissance vocale : ", event.error);
-    };
-
-    recognition.onend = async () => {
-      recordButton.classList.remove('recording');
-      playIcon.classList.remove('recording');
-
-      if (peerConnection?.signalingState === 'stable' || peerConnection?.iceConnectionState === 'connected') {
-        console.log("Envoi du message au chat...", transcript);
-    
-        await fetchWithRetries(`/api/agents/${agentId}/chat/${chatId}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            "streamId": streamId,
-            "sessionId": sessionId,
-            "messages": [
-              {
-                "role": "user",
-                "content": transcript,
-                "created_at": new Date().toString()
-              }
-            ]
-          }),
-        });
-      }
-
-      console.log("Reconnaissance vocale terminée.");
-    };
-  } else {
-    console.warn("L'API Web Speech n'est pas supportée par ce navigateur.");
+  if (!SpeechRecognition) {
+    console.warn("Web Speech API is not supported by this browser.");
+    return;
   }
-};
 
-// Agents API Workflow
-async function agentsAPIworkflow() {
-  axios.defaults.baseURL = "http://localhost:3000/api";
-  axios.defaults.headers.common['content-type'] = 'application/json';
+  const recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.lang = 'fr-FR';
 
-  async function retry(url, retries = 1) {
-    const maxRetryCount = 5;
-    const maxDelaySec = 10;
-    try {
-      let response = await axios.get(`${url}`);
-      if (response.data.status == "done") {
-        return console.log(response.data.id + ": " + response.data.status);
-      } else {
-        throw new Error("Status is not 'done'");
-      }
-    } catch (err) {
-      if (retries <= maxRetryCount) {
-        const delay = Math.min(Math.pow(2, retries) / 4 + Math.random(), maxDelaySec) * 1000;
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        console.log(`Retrying ${retries}/${maxRetryCount}. ${err}`);
-        return retry(url, retries + 1);
-      } else {
-        throw new Error(`Max retries exceeded. error: ${err}`);
-      }
+  recognition.start();
+  recordButton.classList.add('recording');
+  playIcon.classList.add('recording');
+  console.log("Voice recognition started. Speak into the microphone.");
+
+  recognition.onresult = async (event) => {
+    const transcript = event.results[0][0].transcript;
+    console.log("Voice recognition result: ", transcript);
+
+    if (peerConnection?.signalingState === 'stable' || peerConnection?.iceConnectionState === 'connected') {
+      console.log("Sending message to chat...", transcript);
+
+      await fetchWithRetries(`/api/agents/${agentId}/chat/${chatId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          "streamId": streamId,
+          "sessionId": sessionId,
+          "messages": [{
+            "role": "user",
+            "content": transcript,
+            "created_at": new Date().toString(),
+          }],
+        }),
+      });
     }
-  }
+    console.log("Voice recognition ended.");
+  };
 
-  const createKnowledge = await axios.post('/knowledge', {
-    name: "knowledge",
-    description: "D-ID Agents API"
-  });
-  console.log("Create Knowledge:", createKnowledge.data);
+  recognition.onerror = (event) => {
+    console.error("Voice recognition error: ", event.error);
+  };
 
-  let knowledgeId = createKnowledge.data.id;
-  console.log("Knowledge ID: " + knowledgeId);
-
-  const createDocument = await axios.post(`/knowledge/${knowledgeId}/documents`, {
-    "documentType": "html",
-    "source_url": "https://en.wikipedia.org/wiki/Prompt_engineering",
-    "title": "Prompt Engineering Wikipedia Page",
-  });
-  console.log("Create Document: ", createDocument.data);
-
-  let documentId = createDocument.data.id.split("#")[1];
-  console.log("Document ID: " + documentId);
-
-  await retry(`/knowledge/${knowledgeId}/documents/${documentId}`);
-  await retry(`/knowledge/${knowledgeId}`);
-
-  const createAgent = await axios.post('/agents', {
-    "knowledge": {
-      "provider": "pinecone",
-      "embedder": {
-        "provider": "pinecone",
-        "model": "ada02"
-      },
-      "id": knowledgeId
-    },
-    "presenter": {
-      "type": "talk",
-      "voice": {
-        "type": "microsoft",
-        "voice_id": "en-US-JennyMultilingualV2Neural"
-      },
-      "stitch": true,
-      "thumbnail": "https://create-images-results.d-id.com/google-oauth2|109076752811133787983/upl_lNjsboe2okaREFNt45tcs/image.png",
-      "source_url": "https://create-images-results.d-id.com/google-oauth2|109076752811133787983/upl_lNjsboe2okaREFNt45tcs/image.png",
-    },
-    "llm": {
-      "type": "openai",
-      "provider": "openai",
-      "model": "gpt-3.5-turbo-1106",
-      "instructions": "Your name is Emma, an AI designed to assist with information about Prompt Engineering and RAG"
-    },
-    "preview_name": "Emma"
-  });
-  console.log("Create Agent: ", createAgent.data);
-  let agentId = createAgent.data.id;
-  console.log("Agent ID: " + agentId);
-
-  const createChat = await axios.post(`/agents/${agentId}/chat`);
-  console.log("Create Chat: ", createChat.data);
-  let chatId = createChat.data.id;
-  console.log("Chat ID: " + chatId);
-
-  console.log("Create new Agent with Knowledge - DONE!\n Press on the 'Connect' button to proceed.\n Store the created 'agentID' and 'chatId' variables at the bottom of the JS file for future chats");
-  return { agentId: agentId, chatId: chatId };
-}
-
-// Paste Your Created Agent and Chat IDs Here:
-agentId = "agt_O3O9tAZZ";
-chatId = "cht_zufHnPc8Fc11Ub4UVwR-N";
+  recognition.onend = () => {
+    recordButton.classList.remove('recording');
+    playIcon.classList.remove('recording');
+  };
+};
