@@ -114,12 +114,22 @@ button#record-button {
   fill: white;
 }
 
+#play-icon.recording {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  background: white;
+  fill: transparent;
+  border-radius: 5px;
+}
+
 button:hover,
 #destroy-button:hover,
 #connect-button:hover {
-  filter: brightness(85%);
+  filter: brightness(95%);
+  scale: 1.05;
   cursor: pointer;
-  transition: all 0.2s ease-out;
+  transition: all 0.2s ease-in-out;
 }
 
 h4 {

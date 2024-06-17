@@ -263,6 +263,7 @@ connectButton.onclick = async () => {
 };
 
 const recordButton = document.getElementById('record-button');
+const playIcon = document.getElementById('play-icon');
 recordButton.onclick = async () => {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   let transcript = '';
@@ -277,6 +278,7 @@ recordButton.onclick = async () => {
 
     recognition.start();
     recordButton.classList.add('recording');
+    playIcon.classList.add('recording');
     console.log("Reconnaissance vocale commencée. Parlez dans le microphone.");
 
     recognition.onresult = (event) => {
@@ -290,6 +292,7 @@ recordButton.onclick = async () => {
 
     recognition.onend = async () => {
       recordButton.classList.remove('recording');
+      playIcon.classList.remove('recording');
 
       if (peerConnection?.signalingState === 'stable' || peerConnection?.iceConnectionState === 'connected') {
         console.log("Envoi du message au chat...", transcript);
