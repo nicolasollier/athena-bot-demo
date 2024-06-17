@@ -206,6 +206,9 @@ async function fetchWithRetries(url, options, retries = 1) {
 
 const connectButton = document.getElementById('connect-button');
 connectButton.onclick = async () => {
+  connectButton.classList.toggle('loading');
+  connectButton.innerText = 'Connecting...';
+
   if (agentId == "" || agentId === undefined) {
     return alert("1. Click on the 'Create new Agent with Knowledge' button\n2. Open the Console and wait for the process to complete\n3. Press on the 'Connect' button\n4. Type and send a message to the chat\nNOTE: You can store the created 'agentID' and 'chatId' variables at the bottom of the JS file for future chats");
   }
@@ -250,46 +253,71 @@ connectButton.onclick = async () => {
       session_id: sessionId,
     }),
   });
+
+  connectButton.classList.toggle('loading');
+  connectButton.innerText = 'Connected!';
+
+  setTimeout(() => {
+    connectButton.style.display = 'none';
+  }, 2000);
 };
 
-const startButton = document.getElementById('start-button');
-startButton.onclick = async () => {
-  if (peerConnection?.signalingState === 'stable' || peerConnection?.iceConnectionState === 'connected') {
-    let txtAreaValue = document.getElementById("textArea").value;
-    document.getElementById("textArea").value = "";
+const recordButton = document.getElementById('record-button');
+recordButton.onclick = async () => {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let transcript = '';
 
-    await fetchWithRetries(`/api/agents/${agentId}/chat/${chatId}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        "streamId": streamId,
-        "sessionId": sessionId,
-        "messages": [
-          {
-            "role": "user",
-            "content": txtAreaValue,
-            "created_at": new Date().toString()
-          }
-        ]
-      }),
-    });
+  if (SpeechRecognition) {
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'fr-FR';
+
+    const textArea = document.getElementById("textArea");
+
+    recognition.start();
+    recordButton.classList.add('recording');
+    console.log("Reconnaissance vocale commencée. Parlez dans le microphone.");
+
+    recognition.onresult = (event) => {
+      transcript = event.results[0][0].transcript;
+      console.log("Résultat de la reconnaissance vocale : ", transcript);
+    };
+
+    recognition.onerror = (event) => {
+      console.error("Erreur de reconnaissance vocale : ", event.error);
+    };
+
+    recognition.onend = async () => {
+      recordButton.classList.remove('recording');
+
+      if (peerConnection?.signalingState === 'stable' || peerConnection?.iceConnectionState === 'connected') {
+        console.log("Envoi du message au chat...", transcript);
+    
+        await fetchWithRetries(`/api/agents/${agentId}/chat/${chatId}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            "streamId": streamId,
+            "sessionId": sessionId,
+            "messages": [
+              {
+                "role": "user",
+                "content": transcript,
+                "created_at": new Date().toString()
+              }
+            ]
+          }),
+        });
+      }
+
+      console.log("Reconnaissance vocale terminée.");
+    };
+  } else {
+    console.warn("L'API Web Speech n'est pas supportée par ce navigateur.");
   }
-};
-
-const destroyButton = document.getElementById('destroy-button');
-destroyButton.onclick = async () => {
-  await fetch(`/api/talks/streams/${streamId}`, {
-    method: 'DELETE',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ session_id: sessionId }),
-  });
-
-  stopAllStreams();
-  closePC();
 };
 
 // Agents API Workflow
@@ -380,19 +408,6 @@ async function agentsAPIworkflow() {
   console.log("Create new Agent with Knowledge - DONE!\n Press on the 'Connect' button to proceed.\n Store the created 'agentID' and 'chatId' variables at the bottom of the JS file for future chats");
   return { agentId: agentId, chatId: chatId };
 }
-
-const agentsButton = document.getElementById("agents-button");
-agentsButton.onclick = async () => {
-  try {
-    const agentsIds = await agentsAPIworkflow();
-    console.log(agentsIds);
-    agentId = agentsIds.agentId;
-    chatId = agentsIds.chatId;
-    return;
-  } catch (err) {
-    throw new Error(err);
-  }
-};
 
 // Paste Your Created Agent and Chat IDs Here:
 agentId = "agt_O3O9tAZZ";
